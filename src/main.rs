@@ -1,13 +1,17 @@
 // TODO: better error handling
 // The only thing that should actually crash is config issues
 // (or extraordinary circumstances, like unrepresentable times)
-// Otherwise, fall back to a sane default, log, and
+// Otherwise, fall back to a sane default + log
+// TODO: pwalarmctl
+// send requests (new, modify, remove); save to write to .toml
+//   (if and only if user has write access)
 use std::{
     cmp::Ordering, collections::VecDeque, fs::File, io::BufReader, path::Path, time::Duration,
 };
 
 use chrono::{Datelike, Local, NaiveDate, NaiveTime, Weekday};
 use colored::Colorize;
+use notify_rust::Notification;
 use rodio::{source::SamplesConverter, Decoder, OutputStream, Source};
 use serde_derive::{Deserialize, Serialize};
 use toml::value::Datetime;
@@ -24,6 +28,8 @@ struct Config {
 struct GeneralConfig {
     sound: Option<String>,
     poll: Option<u64>,
+    notify: bool,
+    custom_app_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
@@ -35,6 +41,7 @@ struct Alarm {
     repeat: Option<Vec<String>>,
     // TODO: allow Volume control, sets system volume (avoids mute)
     sound: Option<String>,
+    // TODO: allow icon setting for notifications
 }
 
 #[derive(PartialEq, Eq)]
@@ -170,7 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let polltime = if let Some(t) = config.general.poll {
         t
     } else {
-        100
+        250
     };
     // Processing loop
     // TODO: daemonize before entering loop
@@ -198,7 +205,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 loadsnd(global_sound.clone())?
             })?;
-            // TODO: notify-send
+            // TODO: add another condition once icons are added
+            if config.general.notify && (a.alarm.title.is_some() || a.alarm.description.is_some()) {
+                let mut noti = Notification::new();
+                if let Some(ref t) = a.alarm.title {
+                    noti.summary(t);
+                }
+                if let Some(ref t) = a.alarm.description {
+                    noti.body(t);
+                }
+                noti.appname(if let Some(ref s) = config.general.custom_app_name {
+                    s
+                } else {
+                    "pwalarmd"
+                });
+                noti.show()?;
+            }
             a.next_run_date = a.next_run_date.succ_opt().ok_or("out of dates")?;
             // this *can* be expensive, but unless the user has tons of
             // weird repeat schedules, it should be cheap
