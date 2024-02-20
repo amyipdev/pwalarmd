@@ -1,8 +1,9 @@
 [General]
-sound = "assets/hyper-alarm.mp3"
+sound = "../../assets/hyper-alarm.mp3"
 poll = 100
 custom_app_name = "pwalarmd notifier"
 notify = true
+daemon = true
 
 [[Alarm]]
 title = "Test alarm 1"

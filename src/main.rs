@@ -11,6 +11,7 @@ use std::{
 
 use chrono::{Datelike, Local, NaiveDate, NaiveTime, Weekday};
 use colored::Colorize;
+use daemonize::Daemonize;
 use notify_rust::Notification;
 use rodio::{source::SamplesConverter, Decoder, OutputStream, Source};
 use serde_derive::{Deserialize, Serialize};
@@ -30,6 +31,7 @@ struct GeneralConfig {
     poll: Option<u64>,
     notify: bool,
     custom_app_name: Option<String>,
+    daemon: Option<bool>
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
@@ -117,6 +119,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(3)
         }
     };
+    let tmp_stderr = File::create("/tmp/daemon.err")?;
+    let nd = std::env::var("PWALARMD_NODAEMON");
+    if nd == Ok("1".to_string()) || (nd != Ok("0".to_string()) && config.general.daemon != Some(false)) {
+        // TODO: more daemon settings
+        // TODO: cd to assets directory? settable via envvar?
+        let mut cd = std::env::current_exe()?;
+        cd.pop();
+        Daemonize::new().stderr(tmp_stderr).working_directory(cd.clone()).start()?;
+    }
 
     // TODO: better error handling
     // TODO: dynamic config change
@@ -179,8 +190,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         250
     };
+
     // Processing loop
-    // TODO: daemonize before entering loop
     loop {
         std::thread::sleep(Duration::from_millis(polltime));
         // TODO: check config file for changes
