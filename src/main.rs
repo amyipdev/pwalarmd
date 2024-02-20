@@ -31,7 +31,7 @@ struct GeneralConfig {
     poll: Option<u64>,
     notify: bool,
     custom_app_name: Option<String>,
-    daemon: Option<bool>
+    daemon: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
@@ -43,7 +43,7 @@ struct Alarm {
     repeat: Option<Vec<String>>,
     // TODO: allow Volume control, sets system volume (avoids mute)
     sound: Option<String>,
-    // TODO: allow icon setting for notifications
+    icon: Option<String>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -91,7 +91,9 @@ impl Ord for LocalAlarm {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shellex = shellexpand::tilde("~/config/pwalarmd/pwalarmd.toml").to_string();
     // TODO: make this mut for pwalarmctl
-    let config_path: String = if let Ok(v) = std::env::var("PWALARMD_CONFIG") {
+    let config_path: String = if cfg!(debug_assertions) {
+        "./sampleconf.toml".to_string()
+    } else if let Ok(v) = std::env::var("PWALARMD_CONFIG") {
         v.to_string()
     } else if Path::new(&shellex).exists() {
         shellex
@@ -121,12 +123,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let tmp_stderr = File::create("/tmp/daemon.err")?;
     let nd = std::env::var("PWALARMD_NODAEMON");
-    if nd == Ok("1".to_string()) || (nd != Ok("0".to_string()) && config.general.daemon != Some(false)) {
+    if nd == Ok("1".to_string())
+        || (nd != Ok("0".to_string()) && config.general.daemon != Some(false))
+    {
         // TODO: more daemon settings
         // TODO: cd to assets directory? settable via envvar?
         let mut cd = std::env::current_exe()?;
         cd.pop();
-        Daemonize::new().stderr(tmp_stderr).working_directory(cd.clone()).start()?;
+        Daemonize::new()
+            .stderr(tmp_stderr)
+            .working_directory(cd.clone())
+            .start()?;
     }
 
     // TODO: better error handling
@@ -224,6 +231,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if let Some(ref t) = a.alarm.description {
                     noti.body(t);
+                }
+                if let Some(ref t) = a.alarm.icon {
+                    noti.icon(t);
                 }
                 noti.appname(if let Some(ref s) = config.general.custom_app_name {
                     s
