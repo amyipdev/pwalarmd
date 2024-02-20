@@ -1,14 +1,15 @@
 [General]
 sound = "assets/hyper-alarm.mp3"
+poll = 50
 
 [[Alarm]]
 title = "Test alarm 1"
 description = "Is this alarm working?"
 time = 21:30:00
-repeat = ["Su", "Sa", "Tu", "We", "Th", "Fr", "Sa"]
+repeat = ["Su", "Sa", "Tu", "We", "Th", "Fr"]
 
 [[Alarm]]
 title = "Test alarm 2"
 description = "A later alarm..."
 time = 22:00:00
-repeatall = true
+# By not listing repeat, this runs daily
