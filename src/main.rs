@@ -32,9 +32,10 @@ struct GeneralConfig {
     notify: bool,
     custom_app_name: Option<String>,
     daemon: Option<bool>,
+    tpfc: Option<u16>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
 struct Alarm {
     title: Option<String>,
     description: Option<String>,
@@ -85,15 +86,13 @@ impl Ord for LocalAlarm {
     }
 }
 
+// TODO: store sounds in /usr/share/pwalarms/*
 // Packaging config:
 // One in /etc/pwalarmd.toml
 // One in /etc/xdg/pwalarmd/pwalarmd.sample.toml
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shellex = shellexpand::tilde("~/config/pwalarmd/pwalarmd.toml").to_string();
-    // TODO: make this mut for pwalarmctl
-    let config_path: String = if cfg!(debug_assertions) {
-        "./sampleconf.toml".to_string()
-    } else if let Ok(v) = std::env::var("PWALARMD_CONFIG") {
+    let config_path: String = if let Ok(v) = std::env::var("PWALARMD_CONFIG") {
         v.to_string()
     } else if Path::new(&shellex).exists() {
         shellex
@@ -105,8 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         beprint("to ~/.config/pwalarmd/pwalarmd.toml");
         std::process::exit(1)
     };
-    // TODO: mutable configs
-    let config: Config = match toml::from_str(match std::fs::read_to_string(&config_path) {
+    let get_toml = || match toml::from_str(match std::fs::read_to_string(&config_path) {
         Ok(ref s) => s,
         Err(_) => {
             beprint("unable to read config file, aborting");
@@ -121,13 +119,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(3)
         }
     };
+    let mut config: Config = get_toml();
     let tmp_stderr = File::create("/tmp/daemon.err")?;
     let nd = std::env::var("PWALARMD_NODAEMON");
     if nd == Ok("1".to_string())
         || (nd != Ok("0".to_string()) && config.general.daemon != Some(false))
     {
         // TODO: more daemon settings
-        // TODO: cd to assets directory? settable via envvar?
         let mut cd = std::env::current_exe()?;
         cd.pop();
         Daemonize::new()
@@ -137,21 +135,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // TODO: better error handling
-    // TODO: dynamic config change
-    // NOTE: This current state is simply a basic test. This is not the actual app.
-    // Need to make the alarm loop still, and then daemonize.
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
-    //let testfile = BufReader::new(File::open("assets/hyper-alarm.mp3").unwrap());
-    /*let global_sound = Decoder::new(BufReader::new(File::open(
-        config
-            .general
-            .sound
-            .unwrap_or("assets/hyper-alarm.mp3".to_string()),
-    )?))?
-    .convert_samples::<f32>();*/
-    let global_sound = config
+    let mut global_sound = config
         .general
         .sound
+        .clone()
         .unwrap_or("assets/hyper-alarm.mp3".to_string());
 
     // Model for alarms: VecDeque
@@ -162,46 +150,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up initial alarm list
     let mut alarm_ring: VecDeque<LocalAlarm> = VecDeque::new();
-    if let Some(alarms) = config.alarms {
-        for alarm in alarms {
-            let atime = alarm.time.time.unwrap();
-            let loc = Local::now();
-            let ld = loc.date_naive();
-            let la = LocalAlarm {
-                next_run_date: if NaiveTime::from_hms_opt(
-                    atime.hour.into(),
-                    atime.minute.into(),
-                    atime.second.into(),
-                )
-                .ok_or("no legal times")?
-                    > loc.time()
-                {
-                    match find_next_rep(ld, &alarm.repeat) {
-                        Some(v) => v,
-                        None => continue,
-                    }
-                } else {
-                    match find_next_rep(ld.succ_opt().unwrap(), &alarm.repeat) {
-                        Some(v) => v,
-                        None => continue,
-                    }
-                },
-                alarm,
-            };
-            alarm_ring.insert(alarm_ring.binary_search(&la).unwrap_or_else(|e| e), la);
-        }
-    }
+    let mkring =
+        |conf: &Config, ar: &mut VecDeque<LocalAlarm>| -> Result<(), Box<dyn std::error::Error>> {
+            if let Some(ref alarms) = conf.alarms {
+                for alarm in alarms {
+                    let atime = alarm.time.time.unwrap();
+                    let loc = Local::now();
+                    let ld = loc.date_naive();
+                    let la = LocalAlarm {
+                        next_run_date: if NaiveTime::from_hms_opt(
+                            atime.hour.into(),
+                            atime.minute.into(),
+                            atime.second.into(),
+                        )
+                        .ok_or("no legal times")?
+                            > loc.time()
+                        {
+                            match find_next_rep(ld, &alarm.repeat) {
+                                Some(v) => v,
+                                None => continue,
+                            }
+                        } else {
+                            match find_next_rep(ld.succ_opt().unwrap(), &alarm.repeat) {
+                                Some(v) => v,
+                                None => continue,
+                            }
+                        },
+                        alarm: alarm.clone(),
+                    };
+                    ar.insert(ar.binary_search(&la).unwrap_or_else(|e| e), la);
+                }
+            }
+            Ok(())
+        };
+    mkring(&config, &mut alarm_ring)?;
 
-    let polltime = if let Some(t) = config.general.poll {
-        t
-    } else {
-        250
+    let polts = |conf: &Config| {
+        if let Some(t) = conf.general.poll {
+            t
+        } else {
+            250
+        }
     };
+    let mut polltime = polts(&config);
+    // Set up mtime check
+    let mut mtime = std::fs::metadata(&config_path)?.modified()?;
+    let tpfcs = |conf: &Config| {
+        if let Some(t) = conf.general.tpfc {
+            t
+        } else {
+            4
+        }
+    };
+    let mut tpfc = tpfcs(&config);
+    let mut cpfc = tpfc;
 
     // Processing loop
     loop {
         std::thread::sleep(Duration::from_millis(polltime));
-        // TODO: check config file for changes
+        let nmt = std::fs::metadata(&config_path)?.modified()?;
+        if cpfc == 0 {
+            if nmt > mtime {
+                mtime = nmt;
+                config = get_toml();
+                global_sound = config
+                    .general
+                    .sound
+                    .clone()
+                    .unwrap_or("assets/hyper-alarm.mp3".to_string());
+                alarm_ring = VecDeque::new();
+                mkring(&config, &mut alarm_ring)?;
+                polltime = polts(&config);
+                tpfc = tpfcs(&config);
+            }
+            cpfc = tpfc;
+        } else {
+            cpfc -= 1;
+        }
         // TODO: check unix socket for new pwalarmctl requests
         // Examine alarm
         if alarm_ring.len() == 0 {
