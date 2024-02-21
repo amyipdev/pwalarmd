@@ -6,16 +6,28 @@
 // send requests (new, modify, remove); save to write to .toml
 //   (if and only if user has write access)
 use std::{
-    cmp::Ordering, collections::VecDeque, fs::File, io::BufReader, path::Path, time::Duration,
+    cmp::Ordering,
+    collections::VecDeque,
+    fs::File,
+    io::{BufReader, Read, Write},
+    os::unix::net::{UnixListener, UnixStream},
+    path::Path,
+    time::Duration,
 };
 
 use chrono::{Datelike, Local, NaiveDate, NaiveTime, Weekday};
 use colored::Colorize;
 use daemonize::Daemonize;
 use notify_rust::Notification;
+use protobuf::Message;
 use rodio::{source::SamplesConverter, Decoder, OutputStream, Source};
 use serde_derive::{Deserialize, Serialize};
 use toml::value::Datetime;
+
+mod protobuf_sock;
+use protobuf_sock::{ErrorReason, socket_request};
+
+const BUFFER_READ: usize = 16384;
 
 #[derive(Serialize, Deserialize)]
 struct Config {
@@ -120,7 +132,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut config: Config = get_toml();
-    let tmp_stderr = File::create("/tmp/daemon.err")?;
+    let uid = unsafe { libc::getuid() };
+    let tmp_stderr = File::create(format!("/tmp/pwalarmd-{}.err", uid))?;
+    // TODO: kill any other pwalarmds running under the same user
     let nd = std::env::var("PWALARMD_NODAEMON");
     if nd == Ok("1".to_string())
         || (nd != Ok("0".to_string()) && config.general.daemon != Some(false))
@@ -204,10 +218,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut tpfc = tpfcs(&config);
     let mut cpfc = tpfc;
+    let tgt = format!("/run/user/{}/pwalarmd/pwalarmd.sock", uid);
+    std::fs::remove_file(&tgt).unwrap_or(());
+    std::fs::create_dir_all(format!("/run/user/{}/pwalarmd", uid))?;
+    let sock = UnixListener::bind(tgt)?;
+    sock.set_nonblocking(true)?;
+    let mut qbuf = Box::new([0u8; BUFFER_READ]);
 
     // Processing loop
     loop {
         std::thread::sleep(Duration::from_millis(polltime));
+        // Check for config changes
         let nmt = std::fs::metadata(&config_path)?.modified()?;
         if cpfc == 0 {
             if nmt > mtime {
@@ -227,7 +248,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             cpfc -= 1;
         }
-        // TODO: check unix socket for new pwalarmctl requests
+        // Poll the socket (nonblocking)
+        match sock.accept() {
+            Ok((mut socket, _addr)) => 'L1: {
+                socket.set_nonblocking(false)?;
+                let rc = socket.read(&mut *qbuf)?;
+                let res = &qbuf[..rc];
+                let msg;
+                match protobuf_sock::SocketRequest::parse_from_bytes(&res) {
+                    Ok(r) => msg = r,
+                    Err(e) => {
+                        proto_send_error(ErrorReason::ParseFailureError, &mut socket)?;
+                        break 'L1;
+                    }
+                }
+                if msg.message.is_none() {
+                    proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                    break 'L1;
+                }
+                match msg.message.unwrap() {
+                    socket_request::Message::Cgs(v) => {
+                        if v.newsound.is_none() {
+                            proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                            break 'L1;
+                        }
+                        let s = v.newsound.unwrap();
+                        config.general.sound = Some(s.clone());
+                        global_sound = s;
+                    }
+                }
+                proto_send_success(&mut socket)?;
+            }
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::WouldBlock {
+                    beprint("unknown socket pickup error");
+                    std::process::exit(5);
+                }
+            }
+        }
         // Examine alarm
         if alarm_ring.len() == 0 {
             continue;
@@ -317,4 +375,27 @@ fn loadsnd(
     path: String,
 ) -> Result<SamplesConverter<Decoder<BufReader<File>>, f32>, Box<dyn std::error::Error>> {
     Ok(Decoder::new(BufReader::new(File::open(path)?))?.convert_samples::<f32>())
+}
+
+fn proto_send_error(
+    err: ErrorReason,
+    sock: &mut UnixStream,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut resp = protobuf_sock::SocketResponse::new();
+    let mut sr = protobuf_sock::RequestError::new();
+    sr.set_er(err);
+    resp.set_err(sr);
+    resp.write_to(&mut protobuf::CodedOutputStream::new(sock))?;
+    sock.flush()?;
+    sock.set_nonblocking(true)?;
+    Ok(())
+}
+
+fn proto_send_success(sock: &mut UnixStream) -> Result<(), Box<dyn std::error::Error>> {
+    let mut resp = protobuf_sock::SocketResponse::new();
+    resp.set_suc(protobuf_sock::RequestSuccess::new());
+    resp.write_to(&mut protobuf::CodedOutputStream::new(sock))?;
+    sock.flush()?;
+    sock.set_nonblocking(true)?;
+    Ok(())
 }

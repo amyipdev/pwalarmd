@@ -1,0 +1,32 @@
+syntax = "proto2";
+
+// All "optional" elements are currently required
+
+message SocketRequest {
+    oneof message {
+        ChangeGeneralSound cgs = 1;
+    }
+}
+
+message ChangeGeneralSound {
+    optional string newsound = 1;
+}
+
+message SocketResponse {
+    oneof message {
+        RequestError err = 1;
+        RequestSuccess suc = 2;
+    }
+}
+
+message RequestError {
+    optional ErrorReason er = 1;
+}
+
+enum ErrorReason {
+    ParseFailureError = 0;
+    MissingRequiredComponent = 1;
+}
+
+message RequestSuccess {
+}
