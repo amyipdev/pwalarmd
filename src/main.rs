@@ -10,6 +10,7 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{BufReader, Read, Write},
+    ops::Deref,
     os::unix::net::{UnixListener, UnixStream},
     path::Path,
     time::Duration,
@@ -25,7 +26,7 @@ use serde_derive::{Deserialize, Serialize};
 use toml::value::Datetime;
 
 mod protobuf_sock;
-use protobuf_sock::{ErrorReason, socket_request};
+use protobuf_sock::{socket_request, ErrorReason};
 
 const BUFFER_READ: usize = 16384;
 
@@ -132,7 +133,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let mut config: Config = get_toml();
-    let uid = unsafe { libc::getuid() };
     let tmp_stderr = File::create(format!("/tmp/pwalarmd-{}.err", uid))?;
     // TODO: kill any other pwalarmds running under the same user
     let nd = std::env::var("PWALARMD_NODAEMON");
@@ -257,7 +257,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let msg;
                 match protobuf_sock::SocketRequest::parse_from_bytes(&res) {
                     Ok(r) => msg = r,
-                    Err(e) => {
+                    Err(_) => {
                         proto_send_error(ErrorReason::ParseFailureError, &mut socket)?;
                         break 'L1;
                     }
