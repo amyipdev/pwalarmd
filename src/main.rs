@@ -10,7 +10,6 @@ use std::{
     collections::VecDeque,
     fs::File,
     io::{BufReader, Read, Write},
-    ops::Deref,
     os::unix::net::{UnixListener, UnixStream},
     path::Path,
     time::Duration,
@@ -104,6 +103,7 @@ impl Ord for LocalAlarm {
 // One in /etc/pwalarmd.toml
 // One in /etc/xdg/pwalarmd/pwalarmd.sample.toml
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let uid = unsafe { libc::getuid() };
     let shellex = shellexpand::tilde("~/config/pwalarmd/pwalarmd.toml").to_string();
     let config_path: String = if let Ok(v) = std::env::var("PWALARMD_CONFIG") {
         v.to_string()
