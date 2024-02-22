@@ -291,6 +291,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         socket_request::Message::Cpf(v) => {
                             if v.poll.is_none() && v.tpfc.is_none() && v.tsfc.is_none() {
                                 proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                                break 'L1;
                             }
                             if let Some(z) = v.poll {
                                 config.general.poll = Some(z);
@@ -303,6 +304,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(z) = v.tsfc {
                                 config.general.tsfc = Some(z as u16);
                                 tsfc = z as u16;
+                            }
+                        }
+                        socket_request::Message::Sn(v) => {
+                            if let Some(z) = v.noti {
+                                config.general.notify = z;
+                            } else {
+                                proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                                break 'L1;
                             }
                         }
                     }

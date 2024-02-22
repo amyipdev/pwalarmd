@@ -6,6 +6,7 @@ message SocketRequest {
     oneof message {
         ChangeGeneralSound cgs = 1;
         ChangePollFrequency cpf = 2;
+        SetNotify sn = 3;
     }
 }
 
@@ -18,6 +19,10 @@ message ChangePollFrequency {
     optional uint64 poll = 1;
     optional uint32 tpfc = 2;
     optional uint32 tsfc = 3;
+}
+
+message SetNotify {
+    optional bool noti = 1;
 }
 
 message SocketResponse {
