@@ -7,6 +7,7 @@ message SocketRequest {
         ChangeGeneralSound cgs = 1;
         ChangePollFrequency cpf = 2;
         SetNotify sn = 3;
+        ChangeAppName can = 4;
     }
 }
 
@@ -23,6 +24,12 @@ message ChangePollFrequency {
 
 message SetNotify {
     optional bool noti = 1;
+}
+
+// This one is actually optional
+// Not filling it out = no custom name
+message ChangeAppName {
+    optional string newname = 1;
 }
 
 message SocketResponse {

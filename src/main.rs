@@ -281,7 +281,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     match msg.message.unwrap() {
                         socket_request::Message::Cgs(v) => {
                             if v.newsound.is_none() {
-                                proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                                proto_send_error(
+                                    ErrorReason::MissingRequiredComponent,
+                                    &mut socket,
+                                )?;
                                 break 'L1;
                             }
                             let s = v.newsound.unwrap();
@@ -290,7 +293,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         socket_request::Message::Cpf(v) => {
                             if v.poll.is_none() && v.tpfc.is_none() && v.tsfc.is_none() {
-                                proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                                proto_send_error(
+                                    ErrorReason::MissingRequiredComponent,
+                                    &mut socket,
+                                )?;
                                 break 'L1;
                             }
                             if let Some(z) = v.poll {
@@ -310,9 +316,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(z) = v.noti {
                                 config.general.notify = z;
                             } else {
-                                proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                                proto_send_error(
+                                    ErrorReason::MissingRequiredComponent,
+                                    &mut socket,
+                                )?;
                                 break 'L1;
                             }
+                        }
+                        socket_request::Message::Can(v) => {
+                            config.general.custom_app_name = v.newname;
                         }
                     }
                     proto_send_success(&mut socket)?;
