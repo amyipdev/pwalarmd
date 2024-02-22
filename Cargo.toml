@@ -21,3 +21,6 @@ toml = "0.8.10"
 
 [build-dependencies]
 protobuf-codegen = "3.3.0"
+
+[workspace]
+members = ["pwalarmctl"]

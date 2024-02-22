@@ -1483,6 +1483,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwalarmctl"
+version = "0.1.0"
+
+[[package]]
 name = "pwalarmd"
 version = "0.1.0"
 dependencies = [
