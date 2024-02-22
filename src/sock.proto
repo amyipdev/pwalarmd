@@ -5,11 +5,19 @@ syntax = "proto2";
 message SocketRequest {
     oneof message {
         ChangeGeneralSound cgs = 1;
+        ChangePollFrequency cpf = 2;
     }
 }
 
 message ChangeGeneralSound {
     optional string newsound = 1;
+}
+
+// Must send at least one change
+message ChangePollFrequency {
+    optional uint64 poll = 1;
+    optional uint32 tpfc = 2;
+    optional uint32 tsfc = 3;
 }
 
 message SocketResponse {

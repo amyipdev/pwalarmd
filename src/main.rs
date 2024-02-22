@@ -45,6 +45,7 @@ struct GeneralConfig {
     custom_app_name: Option<String>,
     daemon: Option<bool>,
     tpfc: Option<u16>,
+    tsfc: Option<u16>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -203,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(t) = conf.general.poll {
             t
         } else {
-            250
+            125
         }
     };
     let mut polltime = polts(&config);
@@ -213,11 +214,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(t) = conf.general.tpfc {
             t
         } else {
-            4
+            2
+        }
+    };
+    let tsfcs = |conf: &Config| {
+        if let Some(t) = conf.general.tsfc {
+            t
+        } else {
+            1
         }
     };
     let mut tpfc = tpfcs(&config);
     let mut cpfc = tpfc;
+    let mut tsfc = tsfcs(&config);
+    let mut csfc = tsfc;
     let tgt = format!("/run/user/{}/pwalarmd/pwalarmd.sock", uid);
     std::fs::remove_file(&tgt).unwrap_or(());
     std::fs::create_dir_all(format!("/run/user/{}/pwalarmd", uid))?;
@@ -243,48 +253,71 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mkring(&config, &mut alarm_ring)?;
                 polltime = polts(&config);
                 tpfc = tpfcs(&config);
+                tsfc = tsfcs(&config);
             }
             cpfc = tpfc;
         } else {
             cpfc -= 1;
         }
         // Poll the socket (nonblocking)
-        match sock.accept() {
-            Ok((mut socket, _addr)) => 'L1: {
-                socket.set_nonblocking(false)?;
-                let rc = socket.read(&mut *qbuf)?;
-                let res = &qbuf[..rc];
-                let msg;
-                match protobuf_sock::SocketRequest::parse_from_bytes(&res) {
-                    Ok(r) => msg = r,
-                    Err(_) => {
-                        proto_send_error(ErrorReason::ParseFailureError, &mut socket)?;
-                        break 'L1;
-                    }
-                }
-                if msg.message.is_none() {
-                    proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
-                    break 'L1;
-                }
-                match msg.message.unwrap() {
-                    socket_request::Message::Cgs(v) => {
-                        if v.newsound.is_none() {
-                            proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+        if csfc == 0 {
+            match sock.accept() {
+                Ok((mut socket, _addr)) => 'L1: {
+                    socket.set_nonblocking(false)?;
+                    let rc = socket.read(&mut *qbuf)?;
+                    let res = &qbuf[..rc];
+                    let msg;
+                    match protobuf_sock::SocketRequest::parse_from_bytes(&res) {
+                        Ok(r) => msg = r,
+                        Err(_) => {
+                            proto_send_error(ErrorReason::ParseFailureError, &mut socket)?;
                             break 'L1;
                         }
-                        let s = v.newsound.unwrap();
-                        config.general.sound = Some(s.clone());
-                        global_sound = s;
+                    }
+                    if msg.message.is_none() {
+                        proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                        break 'L1;
+                    }
+                    match msg.message.unwrap() {
+                        socket_request::Message::Cgs(v) => {
+                            if v.newsound.is_none() {
+                                proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                                break 'L1;
+                            }
+                            let s = v.newsound.unwrap();
+                            config.general.sound = Some(s.clone());
+                            global_sound = s;
+                        }
+                        socket_request::Message::Cpf(v) => {
+                            if v.poll.is_none() && v.tpfc.is_none() && v.tsfc.is_none() {
+                                proto_send_error(ErrorReason::MissingRequiredComponent, &mut socket)?;
+                            }
+                            if let Some(z) = v.poll {
+                                config.general.poll = Some(z);
+                                polltime = z;
+                            }
+                            if let Some(z) = v.tpfc {
+                                config.general.tpfc = Some(z as u16);
+                                tpfc = z as u16;
+                            }
+                            if let Some(z) = v.tsfc {
+                                config.general.tsfc = Some(z as u16);
+                                tsfc = z as u16;
+                            }
+                        }
+                    }
+                    proto_send_success(&mut socket)?;
+                }
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::WouldBlock {
+                        beprint("unknown socket pickup error");
+                        std::process::exit(5);
                     }
                 }
-                proto_send_success(&mut socket)?;
             }
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::WouldBlock {
-                    beprint("unknown socket pickup error");
-                    std::process::exit(5);
-                }
-            }
+            csfc = tsfc;
+        } else {
+            csfc -= 1;
         }
         // Examine alarm
         if alarm_ring.len() == 0 {
