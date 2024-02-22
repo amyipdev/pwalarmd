@@ -25,7 +25,7 @@ use serde_derive::{Deserialize, Serialize};
 use toml::value::Datetime;
 
 mod protobuf_sock;
-use protobuf_sock::{socket_request, ErrorReason};
+use protobuf_sock::{socket_request, ErrorReason, GeneralInfoType};
 
 const BUFFER_READ: usize = 16384;
 
@@ -137,9 +137,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tmp_stderr = File::create(format!("/tmp/pwalarmd-{}.err", uid))?;
     // TODO: kill any other pwalarmds running under the same user
     let nd = std::env::var("PWALARMD_NODAEMON");
-    if nd == Ok("1".to_string())
-        || (nd != Ok("0".to_string()) && config.general.daemon != Some(false))
-    {
+    let dmzd = nd == Ok("1".to_string())
+               || (nd != Ok("0".to_string()) && config.general.daemon != Some(false));
+    if dmzd {
         // TODO: more daemon settings
         let mut cd = std::env::current_exe()?;
         cd.pop();
@@ -326,6 +326,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         socket_request::Message::Can(v) => {
                             config.general.custom_app_name = v.newname;
                         }
+                        socket_request::Message::Fgi(v) => {
+                            if v.git.is_none() {
+                                proto_send_error(
+                                    ErrorReason::MissingRequiredComponent,
+                                    &mut socket,
+                                )?;
+                                break 'L1;
+                            }
+                            if let Ok(e) = v.git.unwrap().enum_value() {
+                                match e {
+                                    GeneralInfoType::Sound => proto_send_data_st(&mut socket, global_sound.clone())?,
+                                    GeneralInfoType::Poll => proto_send_data_ui(&mut socket, polltime)?,
+                                    GeneralInfoType::Notify => proto_send_data_bl(&mut socket, config.general.notify)?,
+                                    GeneralInfoType::AppName => proto_send_data_st(&mut socket, _get_notiname(&config).to_string())?,
+                                    GeneralInfoType::Daemon => proto_send_data_bl(&mut socket, dmzd)?,
+                                    GeneralInfoType::Tpfc => proto_send_data_sui(&mut socket, tpfc as u32)?,
+                                    GeneralInfoType::Tsfc => proto_send_data_sui(&mut socket, tsfc as u32)?,
+                                }
+                            } else {
+                                proto_send_error(
+                                    ErrorReason::IllegalEnumOption,
+                                    &mut socket,
+                                )?;
+                            }
+                            break 'L1;
+                        }
                     }
                     proto_send_success(&mut socket)?;
                 }
@@ -372,11 +398,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(ref t) = a.alarm.icon {
                     noti.icon(t);
                 }
-                noti.appname(if let Some(ref s) = config.general.custom_app_name {
-                    s
-                } else {
-                    "pwalarmd"
-                });
+                noti.appname(_get_notiname(&config));
                 noti.show()?;
             }
             a.next_run_date = a.next_run_date.succ_opt().ok_or("out of dates")?;
@@ -389,6 +411,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[allow(unreachable_code)]
     Ok(())
+}
+
+fn _get_notiname<'a>(c: &'a Config) -> &'a str {
+    if let Some(ref s) = c.general.custom_app_name {
+        s
+    } else {
+        "pwalarmd"
+    }
 }
 
 fn find_next_rep(mut base: NaiveDate, rep: &Option<Vec<String>>) -> Option<NaiveDate> {
@@ -431,6 +461,8 @@ fn loadsnd(
     Ok(Decoder::new(BufReader::new(File::open(path)?))?.convert_samples::<f32>())
 }
 
+// TODO: evaluate whether setting nonblocking on Stream is necessary
+// (or just listener)
 fn proto_send_error(
     err: ErrorReason,
     sock: &mut UnixStream,
@@ -452,4 +484,36 @@ fn proto_send_success(sock: &mut UnixStream) -> Result<(), Box<dyn std::error::E
     sock.flush()?;
     sock.set_nonblocking(true)?;
     Ok(())
+}
+
+fn _proto_send_data(sock: &mut UnixStream, dat: protobuf_sock::RequestSuccessWithData) -> Result<(), Box<dyn std::error::Error>> {
+    let mut resp = protobuf_sock::SocketResponse::new();
+    resp.set_swd(dat);
+    sock.flush()?;
+    sock.set_nonblocking(true)?;
+    Ok(())
+}
+
+fn proto_send_data_st(sock: &mut UnixStream, s: String) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dat = protobuf_sock::RequestSuccessWithData::new();
+    dat.set_st(s);
+    _proto_send_data(sock, dat)
+}
+
+fn proto_send_data_ui(sock: &mut UnixStream, ui: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dat = protobuf_sock::RequestSuccessWithData::new();
+    dat.set_ui(ui);
+    _proto_send_data(sock, dat)
+}
+
+fn proto_send_data_sui(sock: &mut UnixStream, ui: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dat = protobuf_sock::RequestSuccessWithData::new();
+    dat.set_sui(ui);
+    _proto_send_data(sock, dat)
+}
+
+fn proto_send_data_bl(sock: &mut UnixStream, bl: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut dat = protobuf_sock::RequestSuccessWithData::new();
+    dat.set_bl(bl);
+    _proto_send_data(sock, dat)
 }

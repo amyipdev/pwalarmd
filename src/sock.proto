@@ -8,6 +8,7 @@ message SocketRequest {
         ChangePollFrequency cpf = 2;
         SetNotify sn = 3;
         ChangeAppName can = 4;
+        FetchGeneralInfo fgi = 5;
     }
 }
 
@@ -32,10 +33,28 @@ message ChangeAppName {
     optional string newname = 1;
 }
 
+// Type is mandatory
+message FetchGeneralInfo {
+    optional GeneralInfoType git = 1;
+}
+
+// These should be returned from the runtime env,
+// NOT from the config.
+enum GeneralInfoType {
+    Sound = 1;
+    Poll = 2;
+    Notify = 3;
+    AppName = 4;
+    Daemon = 5;
+    Tpfc = 6;
+    Tsfc = 7;
+}
+
 message SocketResponse {
     oneof message {
         RequestError err = 1;
         RequestSuccess suc = 2;
+        RequestSuccessWithData swd = 3;
     }
 }
 
@@ -46,7 +65,17 @@ message RequestError {
 enum ErrorReason {
     ParseFailureError = 0;
     MissingRequiredComponent = 1;
+    IllegalEnumOption = 2;
 }
 
 message RequestSuccess {
+}
+
+message RequestSuccessWithData {
+    oneof message {
+        string st = 1;
+        uint64 ui = 2;
+        bool bl = 3;
+        uint32 sui = 4;
+    }
 }
