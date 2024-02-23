@@ -2,6 +2,8 @@ syntax = "proto2";
 
 // All "optional" elements are currently required
 
+// TODO: evaluate a FetchAllGeneral request
+
 message SocketRequest {
     oneof message {
         ChangeGeneralSound cgs = 1;
@@ -9,6 +11,7 @@ message SocketRequest {
         SetNotify sn = 3;
         ChangeAppName can = 4;
         FetchGeneralInfo fgi = 5;
+        FetchAlarms fa = 6;
     }
 }
 
@@ -50,11 +53,15 @@ enum GeneralInfoType {
     Tsfc = 7;
 }
 
+message FetchAlarms {
+}
+
 message SocketResponse {
     oneof message {
         RequestError err = 1;
         RequestSuccess suc = 2;
         RequestSuccessWithData swd = 3;
+        RequestSuccessWithAlarms swa = 4;
     }
 }
 
@@ -66,6 +73,7 @@ enum ErrorReason {
     ParseFailureError = 0;
     MissingRequiredComponent = 1;
     IllegalEnumOption = 2;
+    InternalServerError = 3;
 }
 
 message RequestSuccess {
@@ -78,4 +86,22 @@ message RequestSuccessWithData {
         bool bl = 3;
         uint32 sui = 4;
     }
+}
+
+message RequestSuccessWithAlarms {
+    repeated AlarmInfo als = 1;
+}
+
+message AlarmInfo {
+    optional string title = 1;
+    optional string desc = 2;
+    // time is mandatory
+    // bounded between 0 (00:00:00) and 86399
+    // use uint32 instead of duration because we dont
+    // need nanosecond precision
+    optional uint32 time = 3;
+    // length of this can be zero
+    repeated string repeat = 4;
+    optional string sound = 5;
+    optional string icon = 6;
 }

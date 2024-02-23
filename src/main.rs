@@ -6,7 +6,7 @@
 // send requests (new, modify, remove); save to write to .toml
 //   (if and only if user has write access)
 use std::{
-    cmp::Ordering,
+    cmp::{max, Ordering},
     collections::VecDeque,
     fs::File,
     io::{BufReader, Read, Write},
@@ -25,7 +25,7 @@ use serde_derive::{Deserialize, Serialize};
 use toml::value::Datetime;
 
 mod protobuf_sock;
-use protobuf_sock::{socket_request, ErrorReason, GeneralInfoType};
+use protobuf_sock::{socket_request, AlarmInfo, ErrorReason, GeneralInfoType};
 
 const BUFFER_READ: usize = 16384;
 
@@ -364,6 +364,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             break 'L1;
                         }
+                        socket_request::Message::Fa(_) => {
+                            let mut resp = protobuf_sock::SocketResponse::new();
+                            let mut dat = protobuf_sock::RequestSuccessWithAlarms::new();
+                            for la in &alarm_ring {
+                                let a: Result<AlarmInfo, _> = la.alarm.clone().try_into();
+                                if a.is_err() {
+                                    proto_send_error(ErrorReason::InternalServerError, &mut socket)?;
+                                    break 'L1;
+                                }
+                                dat.als.push(a.unwrap());
+                            }
+                            resp.set_swa(dat);
+                            resp.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+                            socket.flush()?;
+                            socket.set_nonblocking(true)?;
+                            break 'L1;
+                        }
                     }
                     proto_send_success(&mut socket)?;
                 }
@@ -504,6 +521,7 @@ fn _proto_send_data(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut resp = protobuf_sock::SocketResponse::new();
     resp.set_swd(dat);
+    resp.write_to(&mut protobuf::CodedOutputStream::new(sock))?;
     sock.flush()?;
     sock.set_nonblocking(true)?;
     Ok(())
@@ -531,4 +549,52 @@ fn proto_send_data_bl(sock: &mut UnixStream, bl: bool) -> Result<(), Box<dyn std
     let mut dat = protobuf_sock::RequestSuccessWithData::new();
     dat.set_bl(bl);
     _proto_send_data(sock, dat)
+}
+
+impl TryFrom<AlarmInfo> for Alarm {
+    type Error = Box<dyn std::error::Error>;
+    fn try_from(value: AlarmInfo) -> Result<Self, Self::Error> {
+        let t = value.time.ok_or("time cannot be absent")?;
+        Ok(Self {
+            title: value.title,
+            description: value.desc,
+            time: {
+                Datetime {
+                    date: None,
+                    time: Some(toml::value::Time {
+                        hour: max((t / 3600) as u8, 23),
+                        minute: max(((t % 3600) / 60) as u8, 59),
+                        second: max((t % 60) as u8, 59),
+                        nanosecond: 0,
+                    }),
+                    offset: None,
+                }
+            },
+            repeat: {
+                if value.repeat.len() != 0 {
+                    Some(value.repeat)
+                } else {
+                    None
+                }
+            },
+            sound: value.sound,
+            icon: value.icon,
+        })
+    }
+}
+
+// Failure should return InternalServerError
+impl TryFrom<Alarm> for AlarmInfo {
+    type Error = Box<dyn std::error::Error>;
+    fn try_from(value: Alarm) -> Result<Self, Self::Error> {
+        let mut ret = Self::new();
+        let t = value.time.time.ok_or("alarm time cannot be none")?;
+        ret.title = value.title;
+        ret.desc = value.description;
+        ret.time = Some(t.hour as u32 * 3600 + t.minute as u32 * 60 + t.second as u32);
+        ret.repeat = value.repeat.unwrap_or(vec![]);
+        ret.sound = value.sound;
+        ret.icon = value.icon;
+        Ok(ret)
+    }
 }
