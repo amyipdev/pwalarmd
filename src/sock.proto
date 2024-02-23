@@ -12,6 +12,7 @@ message SocketRequest {
         ChangeAppName can = 4;
         FetchGeneralInfo fgi = 5;
         FetchAlarms fa = 6;
+        NewAlarm na = 7;
     }
 }
 
@@ -54,6 +55,11 @@ enum GeneralInfoType {
 }
 
 message FetchAlarms {
+}
+
+message NewAlarm {
+    // required
+    optional AlarmInfo al = 1;
 }
 
 message SocketResponse {

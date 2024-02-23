@@ -170,26 +170,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ref alarms) = conf.alarms {
                 for alarm in alarms {
                     let atime = alarm.time.time.unwrap();
-                    let loc = Local::now();
-                    let ld = loc.date_naive();
                     let la = LocalAlarm {
-                        next_run_date: if NaiveTime::from_hms_opt(
-                            atime.hour.into(),
-                            atime.minute.into(),
-                            atime.second.into(),
-                        )
-                        .ok_or("no legal times")?
-                            > loc.time()
-                        {
-                            match find_next_rep(ld, &alarm.repeat) {
-                                Some(v) => v,
-                                None => continue,
-                            }
-                        } else {
-                            match find_next_rep(ld.succ_opt().unwrap(), &alarm.repeat) {
-                                Some(v) => v,
-                                None => continue,
-                            }
+                        next_run_date: match determine_entry_day(atime, &alarm.repeat) {
+                            Some(v) => v,
+                            None => continue,
                         },
                         alarm: alarm.clone(),
                     };
@@ -370,7 +354,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             for la in &alarm_ring {
                                 let a: Result<AlarmInfo, _> = la.alarm.clone().try_into();
                                 if a.is_err() {
-                                    proto_send_error(ErrorReason::InternalServerError, &mut socket)?;
+                                    proto_send_error(
+                                        ErrorReason::InternalServerError,
+                                        &mut socket,
+                                    )?;
                                     break 'L1;
                                 }
                                 dat.als.push(a.unwrap());
@@ -380,6 +367,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             socket.flush()?;
                             socket.set_nonblocking(true)?;
                             break 'L1;
+                        }
+                        socket_request::Message::Na(v) => 'La2: {
+                            if let Some(a) = v.al.into_option() {
+                                let b: Result<Alarm, _> = a.try_into();
+                                if let Ok(c) = b {
+                                    let d = LocalAlarm {
+                                        // unwrap here is safe because TryFrom will always generate valid time
+                                        next_run_date: match determine_entry_day(c.time.time.unwrap(), &c.repeat) {
+                                            Some(v) => v,
+                                            // nonrepeating alarms can silent fail
+                                            None => break 'La2
+                                        },
+                                        alarm: c,
+                                    };
+                                    alarm_ring.insert(
+                                        alarm_ring.binary_search(&d).unwrap_or_else(|e| e),
+                                        d,
+                                    );
+                                } else {
+                                    proto_send_error(
+                                        ErrorReason::MissingRequiredComponent,
+                                        &mut socket,
+                                    )?;
+                                    break 'L1;
+                                }
+                            } else {
+                                proto_send_error(
+                                    ErrorReason::MissingRequiredComponent,
+                                    &mut socket,
+                                )?;
+                                break 'L1;
+                            }
                         }
                     }
                     proto_send_success(&mut socket)?;
@@ -596,5 +615,24 @@ impl TryFrom<Alarm> for AlarmInfo {
         ret.sound = value.sound;
         ret.icon = value.icon;
         Ok(ret)
+    }
+}
+
+fn determine_entry_day(atime: toml::value::Time, rep: &Option<Vec<String>>) -> Option<NaiveDate> {
+    let loc = Local::now();
+    let ld = loc.date_naive();
+    let t = NaiveTime::from_hms_opt(atime.hour.into(), atime.minute.into(), atime.second.into());
+    if let Some(z) = t {
+        find_next_rep(
+            if z > loc.time() {
+                ld
+            } else {
+                ld.succ_opt().unwrap()
+            },
+            rep,
+        )
+    } else {
+        // out of legal times, but not returning Result, so return None
+        None
     }
 }
