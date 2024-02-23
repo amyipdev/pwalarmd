@@ -48,7 +48,7 @@ struct GeneralConfig {
     tsfc: Option<u16>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, PartialOrd, Ord)]
 struct Alarm {
     title: Option<String>,
     description: Option<String>,
@@ -385,6 +385,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         alarm_ring.binary_search(&d).unwrap_or_else(|e| e),
                                         d,
                                     );
+                                } else {
+                                    proto_send_error(
+                                        ErrorReason::MissingRequiredComponent,
+                                        &mut socket,
+                                    )?;
+                                    break 'L1;
+                                }
+                            } else {
+                                proto_send_error(
+                                    ErrorReason::MissingRequiredComponent,
+                                    &mut socket,
+                                )?;
+                                break 'L1;
+                            }
+                        }
+                        socket_request::Message::Ra(v) => {
+                            if let Some(a) = v.al.into_option() {
+                                let b: Result<Alarm, _> = a.try_into();
+                                if let Ok(c) = b {
+                                    match alarm_ring.binary_search_by(|yz| c.cmp(&yz.alarm)) {
+                                        Ok(q) => alarm_ring.remove(q),
+                                        Err(_) => {
+                                            proto_send_error(ErrorReason::DoesNotExist, &mut socket)?;
+                                            break 'L1;
+                                        }
+                                    };
                                 } else {
                                     proto_send_error(
                                         ErrorReason::MissingRequiredComponent,

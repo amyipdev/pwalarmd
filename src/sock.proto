@@ -13,6 +13,7 @@ message SocketRequest {
         FetchGeneralInfo fgi = 5;
         FetchAlarms fa = 6;
         NewAlarm na = 7;
+        RemoveAlarm ra = 8;
     }
 }
 
@@ -62,6 +63,11 @@ message NewAlarm {
     optional AlarmInfo al = 1;
 }
 
+message RemoveAlarm {
+    // required
+    optional AlarmInfo al = 1;
+}
+
 message SocketResponse {
     oneof message {
         RequestError err = 1;
@@ -80,6 +86,7 @@ enum ErrorReason {
     MissingRequiredComponent = 1;
     IllegalEnumOption = 2;
     InternalServerError = 3;
+    DoesNotExist = 4;
 }
 
 message RequestSuccess {
