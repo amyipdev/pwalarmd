@@ -244,6 +244,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cpfc -= 1;
         }
         // Poll the socket (nonblocking)
+        // TODO: add kill command
         if csfc == 0 {
             match sock.accept() {
                 Ok((mut socket, _addr)) => 'L1: {
