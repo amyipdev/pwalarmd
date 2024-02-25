@@ -44,8 +44,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             libc::getuid()
         }));
     match res.cmd {
+        CliCommand::Info => {
+            let mut socket = UnixStream::connect(&sock)?;
+            let mut r: RequestSuccessWithData;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::Sound)?;
+            r = recv_get(&mut socket)?;
+            println!("sound = {}", if r.has_st() {r.st()} else {"unknown"});
+            socket = UnixStream::connect(&sock)?;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::Poll)?;
+            r = recv_get(&mut socket)?;
+            println!("poll = {}", if r.has_ui() {r.ui()} else {0});
+            socket = UnixStream::connect(&sock)?;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::Notify)?;
+            r = recv_get(&mut socket)?;
+            println!("notify = {}", if r.has_bl() {r.bl()} else {false});
+            socket = UnixStream::connect(&sock)?;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::AppName)?;
+            r = recv_get(&mut socket)?;
+            println!("appname = {}", if r.has_st() {r.st()} else {"unknown"});
+            socket = UnixStream::connect(&sock)?;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::Daemon)?;
+            r = recv_get(&mut socket)?;
+            println!("daemon = {}", if r.has_bl() {r.bl()} else {false});
+            socket = UnixStream::connect(&sock)?;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::Tpfc)?;
+            r = recv_get(&mut socket)?;
+            println!("tpfc = {}", if r.has_sui() {r.sui()} else {0});
+            socket = UnixStream::connect(&sock)?;
+            send_get(&mut socket, protobuf_sock::GeneralInfoType::Tsfc)?;
+            r = recv_get(&mut socket)?;
+            println!("tsfc = {}", if r.has_sui() {r.sui()} else {0});
+        }
         CliCommand::Get { attribute } => {
-            let mut socket = UnixStream::connect(sock)?;
+            let mut socket = UnixStream::connect(&sock)?;
             send_get(
                 &mut socket,
                 match attribute.as_str() {

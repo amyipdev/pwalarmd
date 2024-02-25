@@ -188,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(t) = conf.general.poll {
             t
         } else {
-            125
+            10
         }
     };
     let mut polltime = polts(&config);
