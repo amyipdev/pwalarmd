@@ -22,7 +22,7 @@ struct Cli {
     cmd: CliCommand,
 }
 
-// TODO: list alarms, allow removal of alarms
+// TODO: list alarms, allow removal of alarms (id by hash of alarm)
 #[derive(Subcommand)]
 enum CliCommand {
     #[command(about = "print current settings")]
@@ -32,6 +32,7 @@ enum CliCommand {
     },
     Set {
         attribute: String,
+        value: String,
     },
     Kill,
 }
@@ -105,6 +106,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 beprint("server failed to set data type");
                 exit(126);
+            }
+        }
+        CliCommand::Set { attribute, value } => {
+            let mut socket = UnixStream::connect(&sock)?;
+            let mut req = protobuf_sock::SocketRequest::new();
+            match attribute.as_str() {
+                "sound" => {
+                    let mut z = protobuf_sock::ChangeGeneralSound::new();
+                    z.set_newsound(value);
+                    req.set_cgs(z);
+                }
+                "poll" => {
+                    let mut z = protobuf_sock::ChangePollFrequency::new();
+                    let vals: Vec<&str> = value.split(",").collect();
+                    if !(vals.len() == 1 || vals.len() == 3) {
+                        beprint("invalid number of arguments");
+                        beprint("pass either `poll` or 'poll,tpfc,tsfc'");
+                        std::process::exit(125);
+                    }
+                    z.set_poll(vals[0].parse()?);
+                    if vals.len() == 3 {
+                        z.set_tpfc(vals[1].parse()?);
+                        z.set_tsfc(vals[2].parse()?);
+                    }
+                    req.set_cpf(z);
+                }
+                "notify" => {
+                    let mut z = protobuf_sock::SetNotify::new();
+                    match value.as_str() {
+                        "true" => z.set_noti(true),
+                        "false" => z.set_noti(false),
+                        _ => {
+                            beprint("not acceptable boolean value");
+                            std::process::exit(124);
+                        }
+                    }
+                    req.set_sn(z);
+                }
+                "can" => {
+                    let mut z = protobuf_sock::ChangeAppName::new();
+                    z.set_newname(value);
+                    req.set_can(z);
+                }
+                _ => {
+                    beprint(&format!("unknown attribute '{}'", &attribute));
+                    exit(1);
+                }
+            }
+            req.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+            socket.flush()?;
+            if recv(&mut socket)?.has_err() {
+                beprint("server error during value set");
+                std::process::exit(123);
             }
         }
         _ => todo!(),
