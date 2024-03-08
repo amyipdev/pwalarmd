@@ -2,6 +2,15 @@
 name = "pwalarmd"
 version = "0.1.0"
 edition = "2021"
+authors = ["Amy Parker <amy@amyip.net>"]
+description = "Daemon-based configurable CLI alarm clock"
+readme = "README.md"
+rust-version = "1.71"
+homepage = "https://amyip.net"
+repository = "https://github.com/amyipdev/pwalarmctl"
+license = "GPL-2.0-or-later"
+categories = ["command-line-utilities"]
+keywords = ["alarm", "alarms", "pwalarmctl", "notify", "notifications"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

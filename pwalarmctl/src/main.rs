@@ -25,16 +25,25 @@ struct Cli {
 // TODO: list alarms, allow removal of alarms (id by hash of alarm)
 #[derive(Subcommand)]
 enum CliCommand {
-    #[command(about = "print current settings")]
+    #[command(about = "Print current settings")]
     Info,
+    #[command(about = "Print a specific setting")]
     Get {
         attribute: String,
     },
+    #[command(about = "Change a setting")]
     Set {
         attribute: String,
         value: String,
     },
+    #[command(about = "Kill pwalarmd")]
     Kill,
+    #[command(about = "List current alarms")]
+    List,
+    #[command(about = "Delete alarm")]
+    Remove {
+        hash: String
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -161,9 +170,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(123);
             }
         }
-        _ => todo!(),
+        CliCommand::Kill => {
+            let mut socket = UnixStream::connect(&sock)?;
+            let mut sr = protobuf_sock::SocketRequest::new();
+            sr.set_ks(protobuf_sock::KillSwitch::new());
+            sr.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+            socket.flush()?;
+        }
+        CliCommand::List => {
+            let mut socket = UnixStream::connect(&sock)?;
+            let mut sr = protobuf_sock::SocketRequest::new();
+            sr.set_fa(protobuf_sock::FetchAlarms::new());
+            sr.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+            socket.flush()?;
+            let resp = recv(&mut socket)?;
+            if !resp.has_swa() {
+                beprint("could not receive alarms");
+                exit(124);
+            }
+            for m in &resp.swa().als {
+                let t = m.time();
+                println!("{:8x}: \"{}\" @ {:02}:{:02}:{:02} (rep: {:?})", _hashalarms(m), m.title(), t/3600, (t/60)%60, t%60, m.repeat);
+            }
+        }
+        CliCommand::Remove { hash } => {
+            // TODO: dedup with List
+            let h = u32::from_str_radix(&hash, 16)?;
+            let mut socket = UnixStream::connect(&sock)?;
+            let mut sr = protobuf_sock::SocketRequest::new();
+            sr.set_fa(protobuf_sock::FetchAlarms::new());
+            sr.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+            socket.flush()?;
+            let resp = recv(&mut socket)?;
+            if !resp.has_swa() {
+                beprint("could not recieve original alarm list");
+                exit(123);
+            }
+            for m in &resp.swa().als {
+                if _hashalarms(m) == h {
+                    socket = UnixStream::connect(&sock)?;
+                    let mut sr = protobuf_sock::SocketRequest::new();
+                    let mut ins = protobuf_sock::RemoveAlarm::new();
+                    ins.al = protobuf::MessageField(Some(Box::new(m.clone())));
+                    sr.set_ra(ins);
+                    sr.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+                    socket.flush()?;
+                    let res = recv(&mut socket)?;
+                    if res.has_err() {
+                        beprint(&format!("failed to remove alarm: {}", res.err()));
+                        exit(121);
+                    }
+                    exit(0);
+                }
+            }
+            beprint("alarm does not exist");
+            exit(122);
+        }
     }
     Ok(())
+}
+
+fn _hashalarms(a: &protobuf_sock::AlarmInfo) -> u32 {
+    crc32fast::hash(format!("{},{},{},{:?},{},{}", a.title(), a.desc(), a.time(), a.repeat, a.sound(), a.icon()).as_bytes())
 }
 
 fn beprint(msg: &str) {

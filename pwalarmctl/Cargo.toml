@@ -2,9 +2,19 @@
 name = "pwalarmctl"
 version = "0.1.0"
 edition = "2021"
+authors = ["Amy Parker <amy@amyip.net>"]
+rust-version = "1.74"
+readme = "../README.md"
+description = "CLI controller for pwalarmd"
+homepage = "https://amyip.net"
+repository = "https://github.com/amyipdev/pwalarmd"
+license = "GPL-2.0-or-later"
+categories = ["command-line-utilities", "config"]
+keywords = ["alarm", "alarms", "pwalarmd", "notify", "notifications"]
 
 [dependencies]
 clap = { version = "4.5.1", features = ["derive"] }
 colored = "2.1.0"
+crc32fast = "1.4.0"
 libc = "0.2.153"
 protobuf = "3.4.0"

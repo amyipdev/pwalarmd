@@ -14,6 +14,7 @@ message SocketRequest {
         FetchAlarms fa = 6;
         NewAlarm na = 7;
         RemoveAlarm ra = 8;
+        KillSwitch ks = 9;
     }
 }
 
@@ -66,6 +67,9 @@ message NewAlarm {
 message RemoveAlarm {
     // required
     optional AlarmInfo al = 1;
+}
+
+message KillSwitch {
 }
 
 message SocketResponse {

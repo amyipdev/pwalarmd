@@ -6,7 +6,7 @@
 // send requests (new, modify, remove); save to write to .toml
 //   (if and only if user has write access)
 use std::{
-    cmp::{max, Ordering},
+    cmp::{min, Ordering},
     collections::VecDeque,
     fs::File,
     io::{BufReader, Read, Write},
@@ -48,7 +48,7 @@ struct GeneralConfig {
     tsfc: Option<u16>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, PartialOrd, Ord, Debug)]
 struct Alarm {
     title: Option<String>,
     description: Option<String>,
@@ -405,9 +405,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(a) = v.al.into_option() {
                                 let b: Result<Alarm, _> = a.try_into();
                                 if let Ok(c) = b {
-                                    match alarm_ring.binary_search_by(|yz| c.cmp(&yz.alarm)) {
-                                        Ok(q) => alarm_ring.remove(q),
-                                        Err(_) => {
+                                    match alarm_ring.iter().position(|yz| c == yz.alarm) {
+                                        Some(q) => alarm_ring.remove(q),
+                                        None => {
                                             proto_send_error(ErrorReason::DoesNotExist, &mut socket)?;
                                             break 'L1;
                                         }
@@ -426,6 +426,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 )?;
                                 break 'L1;
                             }
+                        }
+                        socket_request::Message::Ks(_) => {
+                            std::process::exit(0);
                         }
                     }
                     proto_send_success(&mut socket)?;
@@ -608,9 +611,9 @@ impl TryFrom<AlarmInfo> for Alarm {
                 Datetime {
                     date: None,
                     time: Some(toml::value::Time {
-                        hour: max((t / 3600) as u8, 23),
-                        minute: max(((t % 3600) / 60) as u8, 59),
-                        second: max((t % 60) as u8, 59),
+                        hour: min((t / 3600) as u8, 23),
+                        minute: min(((t % 3600) / 60) as u8, 59),
+                        second: min((t % 60) as u8, 59),
                         nanosecond: 0,
                     }),
                     offset: None,
