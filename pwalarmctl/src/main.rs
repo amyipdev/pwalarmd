@@ -2,6 +2,7 @@ use std::{
     io::{Read, Write},
     os::unix::net::UnixStream,
     process::exit,
+    str::FromStr,
 };
 
 use clap::{Parser, Subcommand};
@@ -28,22 +29,30 @@ enum CliCommand {
     #[command(about = "Print current settings")]
     Info,
     #[command(about = "Print a specific setting")]
-    Get {
-        attribute: String,
-    },
+    Get { attribute: String },
     #[command(about = "Change a setting")]
-    Set {
-        attribute: String,
-        value: String,
-    },
+    Set { attribute: String, value: String },
     #[command(about = "Kill pwalarmd")]
     Kill,
     #[command(about = "List current alarms")]
     List,
     #[command(about = "Delete alarm")]
-    Remove {
-        hash: String
-    }
+    Remove { hash: String },
+    #[command(about = "Create new alarm")]
+    Add {
+        #[clap(short = 'T', long)]
+        title: Option<String>,
+        #[clap(short, long)]
+        desc: Option<String>,
+        #[clap(short = 't', long)]
+        time: String,
+        #[clap(short, long)]
+        repeat: Option<String>,
+        #[clap(short, long)]
+        sound: Option<String>,
+        #[clap(short, long)]
+        icon: Option<String>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -59,31 +68,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut r: RequestSuccessWithData;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::Sound)?;
             r = recv_get(&mut socket)?;
-            println!("sound = {}", if r.has_st() {r.st()} else {"unknown"});
+            println!("sound = {}", if r.has_st() { r.st() } else { "unknown" });
             socket = UnixStream::connect(&sock)?;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::Poll)?;
             r = recv_get(&mut socket)?;
-            println!("poll = {}", if r.has_ui() {r.ui()} else {0});
+            println!("poll = {}", if r.has_ui() { r.ui() } else { 0 });
             socket = UnixStream::connect(&sock)?;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::Notify)?;
             r = recv_get(&mut socket)?;
-            println!("notify = {}", if r.has_bl() {r.bl()} else {false});
+            println!("notify = {}", if r.has_bl() { r.bl() } else { false });
             socket = UnixStream::connect(&sock)?;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::AppName)?;
             r = recv_get(&mut socket)?;
-            println!("appname = {}", if r.has_st() {r.st()} else {"unknown"});
+            println!("appname = {}", if r.has_st() { r.st() } else { "unknown" });
             socket = UnixStream::connect(&sock)?;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::Daemon)?;
             r = recv_get(&mut socket)?;
-            println!("daemon = {}", if r.has_bl() {r.bl()} else {false});
+            println!("daemon = {}", if r.has_bl() { r.bl() } else { false });
             socket = UnixStream::connect(&sock)?;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::Tpfc)?;
             r = recv_get(&mut socket)?;
-            println!("tpfc = {}", if r.has_sui() {r.sui()} else {0});
+            println!("tpfc = {}", if r.has_sui() { r.sui() } else { 0 });
             socket = UnixStream::connect(&sock)?;
             send_get(&mut socket, protobuf_sock::GeneralInfoType::Tsfc)?;
             r = recv_get(&mut socket)?;
-            println!("tsfc = {}", if r.has_sui() {r.sui()} else {0});
+            println!("tsfc = {}", if r.has_sui() { r.sui() } else { 0 });
         }
         CliCommand::Get { attribute } => {
             let mut socket = UnixStream::connect(&sock)?;
@@ -190,7 +199,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             for m in &resp.swa().als {
                 let t = m.time();
-                println!("{:8x}: \"{}\" @ {:02}:{:02}:{:02} (rep: {:?})", _hashalarms(m), m.title(), t/3600, (t/60)%60, t%60, m.repeat);
+                println!(
+                    "{:8x}: \"{}\" @ {:02}:{:02}:{:02} (rep: {:?})",
+                    _hashalarms(m),
+                    m.title(),
+                    t / 3600,
+                    (t / 60) % 60,
+                    t % 60,
+                    m.repeat
+                );
             }
         }
         CliCommand::Remove { hash } => {
@@ -226,12 +243,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             beprint("alarm does not exist");
             exit(122);
         }
+        CliCommand::Add {
+            title,
+            desc,
+            time,
+            repeat,
+            sound,
+            icon,
+        } => {
+            let tc = time
+                .splitn(3, ':')
+                .map(|z| {
+                    u32::from_str(z).unwrap_or_else(|_| {
+                        beprint("invalid time specifier");
+                        exit(121)
+                    })
+                })
+                .collect::<Vec<_>>();
+            let tv: u32 = match tc.len() {
+                2 => tc[0] * 3600 + tc[1] * 60,
+                3 => tc[0] * 3600 + tc[1] * 60 + tc[2],
+                _ => {
+                    beprint("invalid time specifier");
+                    exit(121);
+                }
+            };
+            let mut v = vec![];
+            if let Some(z) = repeat {
+                if z.len() != 0 {
+                    for m in z.split(",") {
+                        v.push(m.to_string());
+                    }
+                }
+            }
+            let mut socket = UnixStream::connect(&sock)?;
+            let mut sr = protobuf_sock::SocketRequest::new();
+            let mut qu = protobuf_sock::NewAlarm::new();
+            let mut al = protobuf_sock::AlarmInfo::new();
+            al.title = title;
+            al.desc = desc;
+            al.repeat = v;
+            al.sound = sound;
+            al.icon = icon;
+            al.time = Some(tv);
+            qu.al = protobuf::MessageField(Some(Box::new(al)));
+            sr.set_na(qu);
+            sr.write_to(&mut protobuf::CodedOutputStream::new(&mut socket))?;
+            socket.flush()?;
+            if recv(&mut socket)?.has_err() {
+                beprint("unable to create alarm");
+                exit(120);
+            }
+        }
     }
     Ok(())
 }
 
 fn _hashalarms(a: &protobuf_sock::AlarmInfo) -> u32 {
-    crc32fast::hash(format!("{},{},{},{:?},{},{}", a.title(), a.desc(), a.time(), a.repeat, a.sound(), a.icon()).as_bytes())
+    crc32fast::hash(
+        format!(
+            "{},{},{},{:?},{},{}",
+            a.title(),
+            a.desc(),
+            a.time(),
+            a.repeat,
+            a.sound(),
+            a.icon()
+        )
+        .as_bytes(),
+    )
 }
 
 fn beprint(msg: &str) {
@@ -284,7 +364,7 @@ fn recv_get(socket: &mut UnixStream) -> Result<RequestSuccessWithData, Box<dyn s
             _ => {
                 beprint("server returned non-standard error");
                 exit(5);
-            },
+            }
         }
     }
     if !resp.has_swd() {
